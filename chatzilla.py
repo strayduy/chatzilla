@@ -2,7 +2,7 @@ from gevent import monkey
 from flask import Flask, Response, render_template, request
 from socketio import socketio_manage
 from socketio.namespace import BaseNamespace
-from socketio.mixins import BroadcastMixin
+from socketio.mixins import BroadcastMixin, RoomsMixin
 from time import time
 
 monkey.patch_all()
@@ -12,7 +12,7 @@ application.debug = True
 application.config['PORT'] = 5000
 
 
-class ChatNamespace(BaseNamespace, BroadcastMixin):
+class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
     
     stats = {
         "people" : []
@@ -53,13 +53,25 @@ class ChatNamespace(BaseNamespace, BroadcastMixin):
 
         return True, email
 
+    def on_subscribe(self, room):
+        self.join(room)
+        return True, room
+
+    def on_unsubscribe(self, room):
+        self.leave(room)
+        return True, room
+
     def on_message(self, message):
+        message_content = message.content
+        room = message.room
+
         message_data = {
             "sender" : self.session["email"],
-            "content" : message,
+            "room" : room,
+            "content" : message_content,
             "sent" : time()*1000 #ms
         }
-        self.broadcast_event_not_me("message",{ "sender" : self.session["email"], "content" : message})
+        self.emit_to_room(room, "message", message_data)
         return True, message_data
 
 
