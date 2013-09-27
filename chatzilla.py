@@ -62,8 +62,8 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
         return True, room
 
     def on_message(self, message):
-        message_content = message.content
-        room = message.room
+        room = message['room']
+        message_content = message['content']
 
         message_data = {
             "sender" : self.session["email"],
