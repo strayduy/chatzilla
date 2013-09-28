@@ -4,6 +4,8 @@ from socketio import socketio_manage
 from socketio.namespace import BaseNamespace
 from socketio.mixins import BroadcastMixin, RoomsMixin
 from time import time
+import os
+import pymongo
 
 monkey.patch_all()
 
@@ -17,6 +19,30 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
     stats = {
         "people" : []
     }
+
+    @classmethod
+    def get_db_conn(cls):
+        if getattr(cls, 'db', None):
+            return cls.db
+
+        # Retrieve database credentials from environment
+        db_uri = os.getenv('DATABASE_URI', 'mongodb://localhost:27017/')
+        db_user = os.getenv('DATABASE_USER', '')
+        db_password = os.getenv('DATABASE_PASSWORD', '')
+        db_name = os.getenv('DATABASE_NAME', '')
+
+        # Initialize database client and database connection
+        try:
+            db_client = pymongo.MongoReplicaSetClient(db_uri, replicaSet='repl0')
+        except:
+            db_client = pymongo.MongoClient(db_uri)
+        db = db_client[db_name]
+        if db_user and db_password:
+            db.authenticate(db_user, db_password)
+
+        cls.db = db
+
+        return cls.db
 
     def initialize(self):
         self.logger = application.logger
@@ -55,7 +81,11 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
 
     def on_subscribe(self, room):
         self.join(room)
-        return True, room
+
+        # Retrieve message history for this room
+        messages = self.get_message_history(room)
+
+        return True, messages
 
     def on_unsubscribe(self, room):
         self.leave(room)
@@ -72,8 +102,34 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
             "sent" : time()*1000 #ms
         }
         self.emit_to_room(room, "message", message_data)
+
+        # Record message to database
+        self.record_message(message_data)
+
         return True, message_data
 
+    def record_message(self, message_data):
+        # Create a copy since the insert command will mutate the dict
+        message_data_copy = message_data.copy()
+
+        # Insert into database
+        # Set write concern to 0 because I don't care about immediate
+        # consistency
+        db = self.__class__.get_db_conn()
+        db['chat_messages'].insert(message_data_copy, w=0)
+
+    def get_message_history(self, room):
+        db = self.__class__.get_db_conn()
+
+        # Use a list comprehension to return a list instead of a cursor
+        messages = [m for m in
+                    db['chat_messages'].find(
+                        {'room' : room},
+                        {'_id' : 0}
+                    ).sort('sent', pymongo.ASCENDING)
+                   ]
+
+        return messages
 
 
 @application.route('/', methods=['GET'])
