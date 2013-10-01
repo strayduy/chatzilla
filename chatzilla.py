@@ -94,17 +94,19 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
     def on_message(self, message):
         room = message['room']
         message_content = message['content']
+        client_sent = message['client_sent']
 
         message_data = {
             "sender" : self.session["email"],
             "room" : room,
             "content" : message_content,
+            "client_sent" : client_sent,
             "sent" : time()*1000 #ms
         }
         self.emit_to_room(room, "message", message_data)
 
         # Record message to database
-        self.record_message(message_data)
+        message_data = self.record_message(message_data)
 
         return True, message_data
 
@@ -113,21 +115,25 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
         message_data_copy = message_data.copy()
 
         # Insert into database
-        # Set write concern to 0 because I don't care about immediate
-        # consistency
         db = self.__class__.get_db_conn()
-        db['chat_messages'].insert(message_data_copy, w=0)
+        _id = db['chat_messages'].insert(message_data_copy, w=1)
+
+        # Store the ID of the database entry
+        message_data['id'] = str(_id)
+
+        return message_data
 
     def get_message_history(self, room):
         db = self.__class__.get_db_conn()
 
-        # Use a list comprehension to return a list instead of a cursor
-        messages = [m for m in
-                    db['chat_messages'].find(
-                        {'room' : room},
-                        {'_id' : 0}
-                    ).sort('sent', pymongo.ASCENDING)
-                   ]
+        message_cursor = db['chat_messages'].find(
+                            {'room' : room}
+                         ).sort('sent', pymongo.ASCENDING)
+
+        messages = []
+        for message in message_cursor:
+            message['id'] = str(message.pop('_id'))
+            messages.append(message)
 
         return messages
 
