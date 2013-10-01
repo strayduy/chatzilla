@@ -14,6 +14,8 @@ application = Flask(__name__)
 application.debug = True
 application.config['PORT'] = 5000
 
+CHAT_MESSAGE_COLLECTION = os.getenv('CHAT_MESSAGE_COLLECTION', 'chat_messages')
+ROOM_COLLECTION = os.getenv('ROOM_COLLECTION', 'rooms')
 
 class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
     
@@ -104,16 +106,25 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
             "client_sent" : client_sent,
             "sent" : time()*1000 #ms
         }
-        self.emit_to_room(room, "message", message_data)
 
         # Record message to database
         message_data = self.record_message(message_data)
 
+        # Emit message after inserting it into the database so that we can
+        # include the ID of the database entry in the emitted message
+        self.emit_to_room(room, "message", message_data)
+
         return True, message_data
 
     def on_remove_message(self, message_data):
-        room = message_data['room']
+        user = message_data['user']
         message_id = message_data['id']
+        message_sender = message_data['sender']
+        room = message_data['room']
+
+        # Verify that the user has permission to remove this message
+        if not self.has_permission_to_remove(user, room, message_sender):
+            return False, {}
 
         self.emit_to_room(room, 'remove_message', message_id)
 
@@ -127,16 +138,30 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
 
         # Insert into database
         db = self.__class__.get_db_conn()
-        _id = db['chat_messages'].insert(message_data_copy, w=1)
+        _id = db[CHAT_MESSAGE_COLLECTION].insert(message_data_copy, w=1)
 
         # Store the ID of the database entry
         message_data['id'] = str(_id)
 
         return message_data
 
+    def has_permission_to_remove(self, user, room_id, message_sender):
+        # Allow users to remove their own messages
+        if user == message_sender:
+            return True
+
+        # Allow the owner of the room to remove any messages
+        return self.is_owner_of_room(user, room_id)
+
+    def is_owner_of_room(self, user, room_id):
+        db = self.__class__.get_db_conn()
+        room = db[ROOM_COLLECTION].find_one({'_id' : room_id}, {'username' : 1})
+        room_owner = room.get('username')
+        return user == room_owner
+
     def record_removed_message(self, message_id):
         db = self.__class__.get_db_conn()
-        db['chat_messages'].update(
+        db[CHAT_MESSAGE_COLLECTION].update(
                 { '_id' : ObjectId(message_id) },
                 { '$set' : { 'removed' : True }},
                 w=0
@@ -145,7 +170,7 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
     def get_message_history(self, room):
         db = self.__class__.get_db_conn()
 
-        message_cursor = db['chat_messages'].find(
+        message_cursor = db[CHAT_MESSAGE_COLLECTION].find(
                             {'room' : room}
                          ).sort('sent', pymongo.ASCENDING)
 
