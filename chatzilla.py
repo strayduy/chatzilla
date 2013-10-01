@@ -6,6 +6,7 @@ from socketio.mixins import BroadcastMixin, RoomsMixin
 from time import time
 import os
 import pymongo
+from bson.objectid import ObjectId
 
 monkey.patch_all()
 
@@ -110,6 +111,16 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
 
         return True, message_data
 
+    def on_remove_message(self, message_data):
+        room = message_data['room']
+        message_id = message_data['id']
+
+        self.emit_to_room(room, 'remove_message', message_id)
+
+        self.record_removed_message(message_id)
+
+        return True, message_data
+
     def record_message(self, message_data):
         # Create a copy since the insert command will mutate the dict
         message_data_copy = message_data.copy()
@@ -122,6 +133,14 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
         message_data['id'] = str(_id)
 
         return message_data
+
+    def record_removed_message(self, message_id):
+        db = self.__class__.get_db_conn()
+        db['chat_messages'].update(
+                { '_id' : ObjectId(message_id) },
+                { '$set' : { 'removed' : True }},
+                w=0
+        )
 
     def get_message_history(self, room):
         db = self.__class__.get_db_conn()
