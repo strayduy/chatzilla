@@ -63,7 +63,7 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
     def recv_disconnect(self):
         self.log("Client disconnected")
         
-        if self.session.has_key("email"):
+        if self.session.has_key("user_id"):
             email = self.session['email']
 
             self.broadcast_event_not_me("debug", "%s left" % email)
@@ -71,8 +71,9 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
             self.stats["people"] = filter(lambda e : e != email, self.stats["people"])
             self.report_stats()
 
-    def on_join(self, email):
+    def on_join(self, user_id, email):
         self.log("%s joined chat" % email)
+        self.session['user_id'] = user_id
         self.session['email'] = email
 
         if not email in self.stats["people"]:
@@ -80,7 +81,7 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
 
         self.report_stats()
 
-        return True, email
+        return True, user_id, email
 
     def on_subscribe(self, room):
         self.join(room)
@@ -100,6 +101,7 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
         client_sent = message['client_sent']
 
         message_data = {
+            "sender_id" : self.session["user_id"],
             "sender" : self.session["email"],
             "room" : room,
             "content" : message_content,
@@ -117,13 +119,13 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
         return True, message_data
 
     def on_remove_message(self, message_data):
-        user = message_data['user']
+        user_id = self.session['user_id']
         message_id = message_data['id']
-        message_sender = message_data['sender']
+        message_sender_id = message_data['sender_id']
         room = message_data['room']
 
         # Verify that the user has permission to remove this message
-        if not self.has_permission_to_remove(user, room, message_sender):
+        if not self.has_permission_to_remove(user_id, room, message_sender_id):
             return False, {}
 
         self.emit_to_room(room, 'remove_message', message_id)
@@ -145,19 +147,19 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
 
         return message_data
 
-    def has_permission_to_remove(self, user, room_id, message_sender):
+    def has_permission_to_remove(self, user_id, room_id, message_sender_id):
         # Allow users to remove their own messages
-        if user == message_sender:
+        if user_id == message_sender_id:
             return True
 
         # Allow the owner of the room to remove any messages
-        return self.is_owner_of_room(user, room_id)
+        return self.is_owner_of_room(user_id, room_id)
 
-    def is_owner_of_room(self, user, room_id):
+    def is_owner_of_room(self, user_id, room_id):
         db = self.__class__.get_db_conn()
         room = db[ROOM_COLLECTION].find_one({'_id' : room_id}, {'username' : 1})
         room_owner = room.get('username')
-        return user == room_owner
+        return user_id == room_owner
 
     def record_removed_message(self, message_id):
         db = self.__class__.get_db_conn()
