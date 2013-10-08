@@ -16,6 +16,7 @@ application.config['PORT'] = 5000
 
 CHAT_MESSAGE_COLLECTION = os.getenv('CHAT_MESSAGE_COLLECTION', 'chat_messages')
 ROOM_COLLECTION = os.getenv('ROOM_COLLECTION', 'rooms')
+USER_COLLECTION = os.getenv('USER_COLLECTION', 'users')
 
 class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
     
@@ -133,6 +134,21 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
         self.record_removed_message(message_id)
 
         return True, message_data
+
+    def on_avatar_url(self, user_id):
+        # Retrieve avatar URL from user collection, if available
+        db = self.__class__.get_db_conn()
+        user = db[USER_COLLECTION].find_one({'_id' : user_id })
+
+        if not user:
+            return False, ''
+
+        avatar_url = user.get('avatar_url', '')
+        
+        if not avatar_url:
+            return False, ''
+
+        return True, avatar_url
 
     def record_message(self, message_data):
         # Create a copy since the insert command will mutate the dict
