@@ -8,5 +8,6 @@ gevent-websocket==0.3.6
 greenlet==0.4.1
 gunicorn==0.16.1
 itsdangerous==0.23
+newrelic==2.0.0.1
 pymongo==2.6.2
 wsgiref==0.1.2
