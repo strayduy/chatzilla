@@ -136,6 +136,7 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
         return True, message_data
 
     def on_avatar_url(self, user_id):
+        return False, ''
         # Retrieve avatar URL from user collection, if available
         db = self.__class__.get_db_conn()
         user = db[USER_COLLECTION].find_one({'_id' : user_id })
@@ -172,6 +173,7 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
         return self.is_owner_of_room(user_id, room_id)
 
     def is_owner_of_room(self, user_id, room_id):
+        return False
         db = self.__class__.get_db_conn()
         room = db[ROOM_COLLECTION].find_one({'_id' : room_id}, {'username' : 1})
         room_owner = room.get('username')
