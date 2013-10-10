@@ -25,28 +25,47 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
     }
 
     @classmethod
-    def get_db_conn(cls):
-        if getattr(cls, 'db', None):
-            return cls.db
+    def get_read_write_db_conn(cls):
+        if getattr(cls, 'read_write_db', None):
+            return cls.read_write_db
 
         # Retrieve database credentials from environment
-        db_uri = os.getenv('DATABASE_URI', 'mongodb://localhost:27017/')
-        db_user = os.getenv('DATABASE_USER', '')
-        db_password = os.getenv('DATABASE_PASSWORD', '')
-        db_name = os.getenv('DATABASE_NAME', '')
+        uri = os.getenv('READ_WRITE_DATABASE_URI', 'mongodb://localhost:27017/')
+        user = os.getenv('READ_WRITE_DATABASE_USER', '')
+        password = os.getenv('READ_WRITE_DATABASE_PASSWORD', '')
+        db_name = os.getenv('READ_WRITE_DATABASE_NAME', '')
 
-        # Initialize database client and database connection
+        cls.read_write_db = cls.get_db_conn(uri, user, password, db_name)
+
+        return cls.read_write_db
+
+    @classmethod
+    def get_read_only_db_conn(cls):
+        if getattr(cls, 'read_only_db', None):
+            return cls.read_only_db
+
+        # Retrieve database credentials from environment
+        uri = os.getenv('READ_ONLY_DATABASE_URI', 'mongodb://localhost:27017/')
+        user = os.getenv('READ_ONLY_DATABASE_USER', '')
+        password = os.getenv('READ_ONLY_DATABASE_PASSWORD', '')
+        db_name = os.getenv('READ_ONLY_DATABASE_NAME', '')
+
+        cls.read_only_db = cls.get_db_conn(uri, user, password, db_name)
+
+        return cls.read_only_db
+
+    @classmethod
+    def get_db_conn(cls, uri, user, password, db_name):
         try:
-            db_client = pymongo.MongoReplicaSetClient(db_uri, replicaSet='repl0')
+            db_client = pymongo.MongoReplicaSetClient(uri, replicaSet='repl0')
         except:
-            db_client = pymongo.MongoClient(db_uri)
-        db = db_client[db_name]
-        if db_user and db_password:
-            db.authenticate(db_user, db_password)
+            db_client = pymongo.MongoClient(uri)
 
-        cls.db = db
+        db_conn = db_client[db_name]
+        if user and password:
+            db_conn.authenticate(user, password)
 
-        return cls.db
+        return db_conn
 
     def initialize(self):
         self.logger = application.logger
@@ -136,10 +155,9 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
         return True, message_data
 
     def on_avatar_url(self, user_id):
-        return False, ''
         # Retrieve avatar URL from user collection, if available
-        db = self.__class__.get_db_conn()
-        user = db[USER_COLLECTION].find_one({'_id' : user_id })
+        db = self.__class__.get_read_only_db_conn()
+        user = db[USER_COLLECTION].find_one({'_id' : user_id}, slave_okay=True)
 
         if not user:
             return False, ''
@@ -156,7 +174,7 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
         message_data_copy = message_data.copy()
 
         # Insert into database
-        db = self.__class__.get_db_conn()
+        db = self.__class__.get_read_write_db_conn()
         _id = db[CHAT_MESSAGE_COLLECTION].insert(message_data_copy, w=1)
 
         # Store the ID of the database entry
@@ -173,14 +191,15 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
         return self.is_owner_of_room(user_id, room_id)
 
     def is_owner_of_room(self, user_id, room_id):
-        return False
-        db = self.__class__.get_db_conn()
-        room = db[ROOM_COLLECTION].find_one({'_id' : room_id}, {'username' : 1})
+        db = self.__class__.get_read_only_db_conn()
+        room = db[ROOM_COLLECTION].find_one({'_id' : room_id},
+                                            {'username' : 1},
+                                            slave_okay=True)
         room_owner = room.get('username')
         return user_id == room_owner
 
     def record_removed_message(self, message_id):
-        db = self.__class__.get_db_conn()
+        db = self.__class__.get_read_write_db_conn()
         db[CHAT_MESSAGE_COLLECTION].update(
                 { '_id' : ObjectId(message_id) },
                 { '$set' : { 'removed' : True }},
@@ -188,7 +207,7 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
         )
 
     def get_message_history(self, room):
-        db = self.__class__.get_db_conn()
+        db = self.__class__.get_read_write_db_conn()
 
         message_cursor = db[CHAT_MESSAGE_COLLECTION].find(
                             {'room' : room}
