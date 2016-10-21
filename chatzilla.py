@@ -34,8 +34,9 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
         user = os.getenv('READ_WRITE_DATABASE_USER', '')
         password = os.getenv('READ_WRITE_DATABASE_PASSWORD', '')
         db_name = os.getenv('READ_WRITE_DATABASE_NAME', '')
+        replica_set = os.getenv('READ_WRITE_DATABASE_REPLICA_SET', '')
 
-        cls.read_write_db = cls.get_db_conn(uri, user, password, db_name)
+        cls.read_write_db = cls.get_db_conn(uri, user, password, db_name, replica_set=replica_set)
 
         return cls.read_write_db
 
@@ -49,16 +50,17 @@ class ChatNamespace(BaseNamespace, BroadcastMixin, RoomsMixin):
         user = os.getenv('READ_ONLY_DATABASE_USER', '')
         password = os.getenv('READ_ONLY_DATABASE_PASSWORD', '')
         db_name = os.getenv('READ_ONLY_DATABASE_NAME', '')
+        replica_set = os.getenv('READ_ONLY_DATABASE_REPLICA_SET', '')
 
-        cls.read_only_db = cls.get_db_conn(uri, user, password, db_name)
+        cls.read_only_db = cls.get_db_conn(uri, user, password, db_name, replica_set=replica_set)
 
         return cls.read_only_db
 
     @classmethod
-    def get_db_conn(cls, uri, user, password, db_name):
-        try:
-            db_client = pymongo.MongoReplicaSetClient(uri, replicaSet='repl0')
-        except:
+    def get_db_conn(cls, uri, user, password, db_name, replica_set=''):
+        if replica_set:
+            db_client = pymongo.MongoReplicaSetClient(uri, replicaSet=replica_set)
+        else:
             db_client = pymongo.MongoClient(uri)
 
         db_conn = db_client[db_name]
